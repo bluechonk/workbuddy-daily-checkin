@@ -104,19 +104,19 @@ playwright-cli screenshot
 
 加油站在 shadow root 内（宿主如 `wb-slot--menu-signin`）。Playwright CSS 会穿透，`click "#fuel-menu-label"` 可直接用；裸 `document.querySelector` 打不进去。
 
-## 实机结果（2026-09-14 复跑）
+## 实机结果（2026-09-14 复跑，三阶段）
 
-CDP 附加后主界面：
+**阶段 1 — CDP attach 后主界面**（无菜单）：
 
-![WorkBuddy CDP 主界面](workbuddy-cdp.png)
+![阶段1 主界面](workbuddy-cdp.png)
 
-进入 Buddy加油站后（开学季 · 8期 · 今日已领 / 认证领积分）：
+**阶段 2 — 点头像后的账户菜单**（出现 Buddy加油站 入口）：
 
-![Buddy加油站面板](buddy-fuel-panel.png)
+![阶段2 账户菜单](workbuddy-account-menu.png)
 
-按 README 流水复跑校验：
+**阶段 3 — `click "#fuel-menu-label"` 进入加油站**（开学季 · 8期 · 今日已领 / 认证领积分）：
 
-![复跑校验](run-readme-verify.png)
+![阶段3 加油站面板](buddy-fuel-panel.png)
 
 状态摘要：
 
