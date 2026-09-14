@@ -13,89 +13,17 @@ WorkBuddy 是 Electron（Chromium）套壳。启动时加 `--remote-debugging-po
 | 工具 | `playwright-cli` 0.1.19（`@playwright/cli`，npm 全局） |
 | CDP | `http://127.0.0.1:9222` |
 
-结论：**方案可行**，已 attach 成功并读到完整 DOM。
+结论：**方案可行**。`#fuel-*` 选择器已实测稳定，日常操作直接打 id，不必每次全页 `find`。
 
-## 定位 WorkBuddy.exe（pwsh 动态路径）
+## 稳定选择器（实操已确认，直接用）
 
-不要写死用户目录。优先查已知安装位置，找不到再按 `Program Files` / `LocalAppData\Programs` 兜底搜索。
+| 操作 | 命令 | 说明 |
+|---|---|---|
+| 进入加油站 | `playwright-cli click "#fuel-menu-label"` | 菜单入口，id 稳定 |
+| 读今日领取态 | `playwright-cli find "今日已领"` 或看 `#fuel-expanded-claim` | `disabled=true` 表示今日已领 |
+| 认证入口 | `playwright-cli click "#fuel-action"` | 「认证领积分」，id 稳定 |
 
-```powershell
-function Get-WorkBuddyExe {
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs\WorkBuddy\WorkBuddy.exe')
-        (Join-Path $env:ProgramFiles 'WorkBuddy\WorkBuddy.exe')
-        (Join-Path ${env:ProgramFiles(x86)} 'WorkBuddy\WorkBuddy.exe')
-    )
-    foreach ($p in $candidates) {
-        if ($p -and (Test-Path -LiteralPath $p)) { return (Resolve-Path -LiteralPath $p).Path }
-    }
-
-    $searchRoots = @(
-        (Join-Path $env:ProgramFiles '*')
-        (Join-Path ${env:ProgramFiles(x86)} '*')
-        (Join-Path $env:LOCALAPPDATA 'Programs\*')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath (Split-Path $_ -Parent)) }
-
-    foreach ($root in $searchRoots) {
-        $hit = Get-ChildItem -Path $root -Filter 'WorkBuddy.exe' -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($hit) { return $hit.FullName }
-    }
-
-    throw 'WorkBuddy.exe not found. Install WorkBuddy or pass -WorkBuddyExe explicitly.'
-}
-
-$WorkBuddyExe = Get-WorkBuddyExe
-Write-Host "WorkBuddy: $WorkBuddyExe"
-```
-
-## 操作流水
-
-```powershell
-# 0. 解析 exe 路径（见上）
-$WorkBuddyExe = Get-WorkBuddyExe
-$CDPPort = 9222
-
-# 1. 杀掉已有实例（默认启动没有调试端口）
-Get-Process WorkBuddy -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 2
-
-# 2. 带调试端口重启
-Start-Process -FilePath $WorkBuddyExe -ArgumentList "--remote-debugging-port=$CDPPort"
-Start-Sleep -Seconds 6
-
-# 3. 确认 CDP
-Invoke-WebRequest "http://127.0.0.1:$CDPPort/json/version" -UseBasicParsing
-```
-
-```bash
-# 4. 附加（attach，不是 open）
-playwright-cli attach --cdp=http://127.0.0.1:9222
-
-# 5. 打开用户菜单（头像按钮 ref 以当次 snapshot 为准）
-playwright-cli find "セシリア"
-playwright-cli click e84
-
-# 6. 精准进入 Buddy加油站
-playwright-cli click "#fuel-menu-label"
-
-# 7. 校验
-playwright-cli find "今日已领"
-playwright-cli find "认证领积分"
-playwright-cli screenshot
-```
-
-## Shadow DOM 注意点
-
-加油站 UI 在 shadow root 内，宿主例如：
-
-- `div.wb-slot.wb-slot--menu-signin`
-- `div.wb-slot--closable-content`
-- `div.wb-slot.wb-slot--menu-growth-content`
-
-`document.querySelector('#fuel-...')` 默认打不进去。Playwright 的 CSS 选择器会自动穿透，可直接 `click "#fuel-menu-label"`。若用 `eval`，需自行遍历 `el.shadowRoot`。
-
-## 选择器
+完整 id 表：
 
 | 元素 | id | class |
 |---|---|---|
@@ -109,19 +37,95 @@ playwright-cli screenshot
 | 今日领取 | `#fuel-expanded-claim` | `fuel-btn` |
 | 认证领积分 | `#fuel-action` | `fuel-btn fuel-secondary` |
 
-## 当前账号状态（2026-09-14）
+> 快照里的 `e84` / `e101` 等 **ref 每次 attach 都会变**，不能当长期记忆键。头像按钮无固定 id，需要时再 `find "セシリア"`。
 
-```
-开学季 / Buddy加油站·8期 / 9/15结束
-今日可领100积分 · 已领6天 · 累计600分
-#fuel-expanded-claim  今日已领   disabled=true
-#fuel-action          认证领积分 disabled=false
+## 定位 WorkBuddy.exe（pwsh 动态路径）
+
+```powershell
+function Get-WorkBuddyExe {
+    $roots = @(
+        $env:LOCALAPPDATA
+        $env:ProgramFiles
+        ${env:ProgramFiles(x86)}
+    ) | Where-Object { $_ }
+
+    foreach ($r in $roots) {
+        $p = if ($r -eq $env:LOCALAPPDATA) {
+            Join-Path $r 'Programs\WorkBuddy\WorkBuddy.exe'
+        } else {
+            Join-Path $r 'WorkBuddy\WorkBuddy.exe'
+        }
+        if (Test-Path -LiteralPath $p) { return (Resolve-Path -LiteralPath $p).Path }
+    }
+
+    foreach ($r in $roots) {
+        $prefix = if ($r -eq $env:LOCALAPPDATA) { Join-Path $r 'Programs' } else { $r }
+        if (-not (Test-Path -LiteralPath $prefix)) { continue }
+        $hit = Get-ChildItem -Path $prefix -Filter 'WorkBuddy.exe' -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+
+    throw 'WorkBuddy.exe not found.'
+}
+
+$WorkBuddyExe = Get-WorkBuddyExe
+$CDPPort = 9222
 ```
 
-本次未执行领取（今日已领），未点击「认证领积分」。
+## 操作流水
+
+```powershell
+$WorkBuddyExe = Get-WorkBuddyExe
+$CDPPort = 9222
+
+Get-Process WorkBuddy -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Seconds 2
+Start-Process -FilePath $WorkBuddyExe -ArgumentList "--remote-debugging-port=$CDPPort"
+Start-Sleep -Seconds 6
+Invoke-WebRequest "http://127.0.0.1:$CDPPort/json/version" -UseBasicParsing
+```
+
+```bash
+playwright-cli attach --cdp=http://127.0.0.1:9222
+
+# 需要先打开账户菜单时（头像无固定 id）
+playwright-cli find "セシリア"
+playwright-cli click <当次ref>
+
+# 之后固定走 id，不必重扫
+playwright-cli click "#fuel-menu-label"
+playwright-cli find "今日已领"
+playwright-cli find "认证领积分"
+playwright-cli screenshot
+```
+
+## Shadow DOM
+
+加油站在 shadow root 内（宿主如 `wb-slot--menu-signin`）。Playwright CSS 会穿透，`click "#fuel-menu-label"` 可直接用；裸 `document.querySelector` 打不进去。
+
+## 实机结果（2026-09-14 复跑）
+
+CDP 附加后主界面：
+
+![WorkBuddy CDP 主界面](workbuddy-cdp.png)
+
+进入 Buddy加油站后（开学季 · 8期 · 今日已领 / 认证领积分）：
+
+![Buddy加油站面板](buddy-fuel-panel.png)
+
+按 README 流水复跑校验：
+
+![复跑校验](run-readme-verify.png)
+
+状态摘要：
+
+- `#fuel-expanded-claim` =「今日已领」`disabled=true`（今日已领，未再点）
+- `#fuel-action` =「认证领积分」可点（未点击，避免误触发）
 
 ## 限制
 
 - 必须用 `--remote-debugging-port` 启动；普通启动连不上
 - 应用重启后需重新 attach
 - 端口默认 9222，改端口要同步改 attach URL
+- `#fuel-*` 若改版失效，再用 `find` / shadow 穿透重新定位
